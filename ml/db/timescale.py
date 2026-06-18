@@ -6,6 +6,7 @@ from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 
 class TimescaleClient(AbstractContextManager["TimescaleClient"]):
@@ -132,6 +133,36 @@ class TimescaleClient(AbstractContextManager["TimescaleClient"]):
         )
         return key
 
+    def upsert_prediction(self, prediction: dict[str, Any], timestamp: datetime | None = None) -> str:
+        # One row stores the latest forecast snapshot for one ticker/model/horizon.
+        timestamp = minute_timestamp(timestamp or datetime.now(timezone.utc))
+        ticker = str(prediction["ticker"]).upper()
+        model = str(prediction["model"])
+        horizon_days = int(prediction["horizon_days"])
+        key = prediction_idempotency_key(self.user_id, ticker, model, horizon_days, timestamp)
+        self.execute(
+            """
+            INSERT INTO predictions
+                (time, user_id, ticker, model, horizon_days, direction, confidence,
+                 forecast_values, feature_importance, idempotency_key)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (time, idempotency_key) DO NOTHING
+            """,
+            (
+                timestamp,
+                self.user_id,
+                ticker,
+                model,
+                horizon_days,
+                prediction["direction"],
+                float(prediction["confidence"]),
+                Jsonb(prediction.get("forecast_values")),
+                Jsonb(prediction["feature_importance"]) if prediction.get("feature_importance") is not None else None,
+                key,
+            ),
+        )
+        return key
+
 
 def conninfo() -> str:
     # Read DB settings from env so Docker and local runs share one code path.
@@ -162,6 +193,12 @@ def minute_bucket(value: datetime) -> str:
     return value.strftime("%Y-%m-%dT%H:%M")
 
 
+def minute_timestamp(value: datetime) -> datetime:
+    # Use the same minute bucket in the stored time and the idempotency hash.
+    value = ensure_utc(value)
+    return value.replace(second=0, microsecond=0)
+
+
 def quote_idempotency_key(user_id: str, ticker: str, timestamp: datetime) -> str:
     # Same user + ticker + minute => same logical quote write.
     return hash_key(user_id, ticker.upper(), minute_bucket(timestamp))
@@ -174,3 +211,13 @@ def ohlcv_idempotency_key(user_id: str, ticker: str, timestamp: datetime, interv
 
 def indicator_idempotency_key(user_id: str, ticker: str, timestamp: datetime) -> str:
     return hash_key(user_id, ticker.upper(), minute_bucket(timestamp))
+
+
+def prediction_idempotency_key(
+    user_id: str,
+    ticker: str,
+    model: str,
+    horizon_days: int,
+    timestamp: datetime,
+) -> str:
+    return hash_key(user_id, ticker.upper(), model, horizon_days, minute_bucket(timestamp))
