@@ -150,6 +150,8 @@ services:
       KAFKA_BROKERS: redpanda:9092
       ML_JOBS_TOPIC: jobs.ml
       ML_WORKER_GROUP: market-intel-ml-worker
+      TICKERS: ${TICKERS:-AAPL}
+      DEMO_MODE: ${DEMO_MODE:-false}
     volumes:
       - ./ml:/app/ml
     depends_on:
