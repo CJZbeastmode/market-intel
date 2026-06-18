@@ -1,0 +1,12 @@
+yfinance
+prophet
+httpx
+feedparser
+fredapi
+praw
+newsapi-python
+transformers
+torch
+sentencepiece
+plotly
+python-dotenv
