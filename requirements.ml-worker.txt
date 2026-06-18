@@ -3,3 +3,4 @@ kafka-python
 psycopg[binary]
 redis
 python-dotenv
+pybind11

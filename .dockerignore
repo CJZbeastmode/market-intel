@@ -1,9 +1,10 @@
-credentials.txt
-.env
-.venv/
-TODO
-__pycache__/
+.git
+.venv
+__pycache__
 *.py[cod]
 *$py.class
+.env
+credentials.txt
+TODO
 indicators*.so
 ml/indicators/build*/
