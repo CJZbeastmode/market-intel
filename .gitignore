@@ -5,3 +5,5 @@ TODO
 __pycache__/
 *.py[cod]
 *$py.class
+indicators*.so
+ml/indicators/build*/
