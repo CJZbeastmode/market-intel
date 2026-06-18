@@ -12,6 +12,8 @@ JOB_NAME="${JOB_NAME:-fetch_live_quotes}"
 JOB_CRON="${JOB_CRON:-*/1 * * * 1-5}"
 # Payload must stay JSON-escaped because it is itself a JSON string inside the API request.
 JOB_PAYLOAD_JSON='jobs.ml:{\"job\":\"fetch_quotes\"}'
+COMPUTE_INDICATORS_CRON="${COMPUTE_INDICATORS_CRON:-*/5 * * * 1-5}"
+COMPUTE_INDICATORS_PAYLOAD_JSON='jobs.ml:{\"job\":\"compute_indicators\"}'
 
 tmp_file="$(mktemp)"
 trap 'rm -f "$tmp_file"' EXIT
@@ -54,9 +56,48 @@ request() {
 
 delete_job() {
     # Delete uses a softer curl mode because "job not found" is still okay for reruns.
+    job_id="$1"
     curl -sS --max-time 10 \
         -X DELETE \
-        "$api/jobs/$JOB_ID" > "$tmp_file"
+        "$api/jobs/$job_id" > "$tmp_file"
+}
+
+seed_job() {
+    job_id="$1"
+    job_name="$2"
+    cron_expr="$3"
+    payload="$4"
+
+    # First remove any older copy of the job so reruns stay idempotent.
+    if ! delete_job "$job_id"; then
+        echo "failed to delete existing job: $job_id" >&2
+        cat "$tmp_file" >&2
+        exit 1
+    fi
+    if grep -q "job not found" "$tmp_file"; then
+        echo "job not present: $job_id"
+    elif [ ! -s "$tmp_file" ]; then
+        echo "deleted existing job: $job_id"
+    else
+        echo "failed to delete existing job: $job_id" >&2
+        cat "$tmp_file" >&2
+        exit 1
+    fi
+
+    job_json="$(printf '{"id":"%s","name":"%s","cron_expr":"%s","executor":"kafka","payload":"%s","catchup_policy":"skip","partition_key":"default","enabled":true}' \
+        "$job_id" \
+        "$job_name" \
+        "$cron_expr" \
+        "$payload")"
+
+    if ! request POST "$api/jobs" "$job_json"; then
+        echo "failed to create job: $job_name" >&2
+        cat "$tmp_file" >&2
+        exit 1
+    fi
+
+    echo "created job: $job_name"
+    cat "$tmp_file"
 }
 
 if [ -n "${API_URL:-}" ]; then
@@ -70,38 +111,25 @@ fi
 
 echo "using API: $api"
 
-# First remove any older copy of the job so reruns stay idempotent.
-if ! delete_job; then
-    echo "failed to delete existing job" >&2
-    cat "$tmp_file" >&2
-    exit 1
-fi
-if grep -q "job not found" "$tmp_file"; then
-    echo "job not present: $JOB_ID"
-elif [ ! -s "$tmp_file" ]; then
-    echo "deleted existing job: $JOB_ID"
-else
-    echo "failed to delete existing job" >&2
-    cat "$tmp_file" >&2
-    exit 1
-fi
-
-# This is the real scheduler job we install into the cluster.
+# These are the scheduler jobs we install into the cluster.
+#
+# fetch_live_quotes:
 # It means:
 # run every minute on weekdays
 # use the Kafka executor
 # publish {"job":"fetch_quotes"} to jobs.ml
-job_json="$(printf '{"id":"%s","name":"%s","cron_expr":"%s","executor":"kafka","payload":"%s","catchup_policy":"skip","partition_key":"default","enabled":true}' \
+seed_job \
     "$JOB_ID" \
     "$JOB_NAME" \
     "$JOB_CRON" \
-    "$JOB_PAYLOAD_JSON")"
+    "$JOB_PAYLOAD_JSON"
 
-if ! request POST "$api/jobs" "$job_json"; then
-    echo "failed to create job" >&2
-    cat "$tmp_file" >&2
-    exit 1
-fi
-
-echo "created job: $JOB_NAME"
-cat "$tmp_file"
+# compute_indicators:
+# run every five minutes on weekdays
+# use the Kafka executor
+# publish {"job":"compute_indicators"} to jobs.ml
+seed_job \
+    "compute_indicators" \
+    "compute_indicators" \
+    "$COMPUTE_INDICATORS_CRON" \
+    "$COMPUTE_INDICATORS_PAYLOAD_JSON"
