@@ -10,3 +10,6 @@ torch
 sentencepiece
 plotly
 python-dotenv
+kafka-python
+psycopg[binary]
+redis

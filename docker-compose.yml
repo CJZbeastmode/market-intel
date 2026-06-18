@@ -136,6 +136,31 @@ services:
       retries: 20
     restart: unless-stopped
 
+  ml-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: "5432"
+      DB_NAME: marketintel
+      DB_USER: marketintel
+      DB_PASSWORD: ${DB_PASSWORD:-marketintel_dev}
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BROKERS: redpanda:9092
+      ML_JOBS_TOPIC: jobs.ml
+      ML_WORKER_GROUP: market-intel-ml-worker
+    volumes:
+      - ./ml:/app/ml
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   raft-data-1:
   raft-data-2:
