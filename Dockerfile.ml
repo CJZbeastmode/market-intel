@@ -10,8 +10,8 @@ RUN apt-get update \
         cmake \
     && rm -rf /var/lib/apt/lists/*
 
-# The worker only needs the small runtime set for Sprint 2.
-# We do not install the full ML stack here because that would pull huge Torch/CUDA packages.
+# The worker installs only the runtime stack needed so far:
+# Kafka jobs, DB/Redis clients, C++ indicators, and the Prophet baseline.
 COPY requirements.ml-worker.txt ./
 RUN pip install --no-cache-dir -r requirements.ml-worker.txt
 
