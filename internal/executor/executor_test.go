@@ -1,8 +1,11 @@
 package executor
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +91,60 @@ func TestKafkaExecutorBadPayload(t *testing.T) {
 	}
 }
 
+func TestKafkaExecutorPublishes(t *testing.T) {
+	producer := &fakeKafkaProducer{}
+	e := KafkaExecutor{
+		Brokers:  []string{"localhost:9092"},
+		Producer: producer,
+	}
+
+	if err := e.Execute(store.Job{ID: "k3", Payload: `jobs.ml:{"job":"fetch_quotes"}`}); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if producer.topic != "jobs.ml" {
+		t.Fatalf("topic: got %q, want %q", producer.topic, "jobs.ml")
+	}
+	if string(producer.key) != "k3" {
+		t.Fatalf("key: got %q, want %q", string(producer.key), "k3")
+	}
+	if string(producer.value) != `{"job":"fetch_quotes"}` {
+		t.Fatalf("value: got %q", string(producer.value))
+	}
+	if len(producer.brokers) != 1 || producer.brokers[0] != "localhost:9092" {
+		t.Fatalf("brokers: got %v", producer.brokers)
+	}
+}
+
+func TestKafkaExecutorPublishError(t *testing.T) {
+	e := KafkaExecutor{
+		Brokers:  []string{"localhost:9092"},
+		Producer: &fakeKafkaProducer{err: errors.New("broker down")},
+	}
+
+	err := e.Execute(store.Job{ID: "k4", Payload: `jobs.ml:{"job":"fetch_quotes"}`})
+	if err == nil || !strings.Contains(err.Error(), "broker down") {
+		t.Fatalf("expected broker error, got %v", err)
+	}
+}
+
+func TestKafkaExecutorLivePublish(t *testing.T) {
+	if os.Getenv("KAFKA_INTEGRATION_TEST") != "1" {
+		t.Skip("set KAFKA_INTEGRATION_TEST=1 to publish to a real Kafka broker")
+	}
+	brokers := splitCSV(os.Getenv("KAFKA_BROKERS"))
+	if len(brokers) == 0 {
+		brokers = []string{"localhost:9092"}
+	}
+
+	e := KafkaExecutor{
+		Brokers: brokers,
+		Timeout: 5 * time.Second,
+	}
+	if err := e.Execute(store.Job{ID: "k-live", Payload: `market.events:{"source":"go-test","event":"kafka-executor"}`}); err != nil {
+		t.Fatalf("expected live publish success, got %v", err)
+	}
+}
+
 func TestDispatcherShell(t *testing.T) {
 	d := NewDispatcher("")
 	if err := d.Dispatch(store.Job{ID: "d1", Executor: "shell", Payload: "echo dispatch"}); err != nil {
@@ -101,4 +158,20 @@ func TestDispatcherUnknown(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown executor") {
 		t.Fatalf("expected unknown executor error, got %v", err)
 	}
+}
+
+type fakeKafkaProducer struct {
+	brokers []string
+	topic   string
+	key     []byte
+	value   []byte
+	err     error
+}
+
+func (f *fakeKafkaProducer) Publish(ctx context.Context, brokers []string, topic string, key []byte, value []byte) error {
+	f.brokers = append([]string(nil), brokers...)
+	f.topic = topic
+	f.key = append([]byte(nil), key...)
+	f.value = append([]byte(nil), value...)
+	return f.err
 }

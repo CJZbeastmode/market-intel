@@ -2,3 +2,6 @@ credentials.txt
 .env
 .venv/
 TODO
+__pycache__/
+*.py[cod]
+*$py.class
