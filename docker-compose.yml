@@ -9,12 +9,19 @@ services:
       ME: "0"
       API_ADDR: ":8080"
       RAFT_DATA_DIR: "/data"
-      KAFKA_BROKERS: ""
+      KAFKA_BROKERS: "redpanda:9092"
     volumes:
       - raft-data-1:/data
       - ./config.yaml:/config.yaml:ro
     ports:
       - "8080:8080"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
     restart: unless-stopped
 
   crond-2:
@@ -27,12 +34,19 @@ services:
       ME: "1"
       API_ADDR: ":8081"
       RAFT_DATA_DIR: "/data"
-      KAFKA_BROKERS: ""
+      KAFKA_BROKERS: "redpanda:9092"
     volumes:
       - raft-data-2:/data
       - ./config.yaml:/config.yaml:ro
     ports:
       - "8081:8081"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
     restart: unless-stopped
 
   crond-3:
@@ -45,15 +59,87 @@ services:
       ME: "2"
       API_ADDR: ":8082"
       RAFT_DATA_DIR: "/data"
-      KAFKA_BROKERS: ""
+      KAFKA_BROKERS: "redpanda:9092"
     volumes:
       - raft-data-3:/data
       - ./config.yaml:/config.yaml:ro
     ports:
       - "8082:8082"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: marketintel
+      POSTGRES_USER: marketintel
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-marketintel_dev}
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - ./deployment/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketintel -d marketintel"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redpanda:
+    image: redpandadata/redpanda:latest
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
     restart: unless-stopped
 
 volumes:
   raft-data-1:
   raft-data-2:
   raft-data-3:
+  timescale-data:
+  redis-data:
+  redpanda-data:
