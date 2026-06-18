@@ -11,12 +11,14 @@ double nan_value() {
     return std::numeric_limits<double>::quiet_NaN();
 }
 
+// Most indicators need a positive lookback window.
 void require_period(int period, const char* name) {
     if (period <= 0) {
         throw std::invalid_argument(std::string(name) + " period must be positive");
     }
 }
 
+// Some indicators use parallel arrays, so their lengths must match.
 void require_same_size(const std::vector<double>& a, const std::vector<double>& b, const char* name) {
     if (a.size() != b.size()) {
         throw std::invalid_argument(std::string(name) + " inputs must have the same length");
@@ -37,6 +39,8 @@ struct BollingerResult {
     std::vector<double> lower;
 };
 
+// RSI uses Wilder smoothing:
+// seed average gain/loss first, then smooth the next points.
 std::vector<double> rsi(const std::vector<double>& prices, int period) {
     require_period(period, "RSI");
     if (prices.size() < static_cast<size_t>(period + 1)) {
@@ -73,6 +77,7 @@ std::vector<double> rsi(const std::vector<double>& prices, int period) {
     return result;
 }
 
+// SMA is the rolling arithmetic mean over a fixed window.
 std::vector<double> sma(const std::vector<double>& prices, int period) {
     require_period(period, "SMA");
     if (prices.size() < static_cast<size_t>(period)) {
@@ -95,6 +100,7 @@ std::vector<double> sma(const std::vector<double>& prices, int period) {
     return result;
 }
 
+// EMA starts from an SMA seed and then gives more weight to new prices.
 std::vector<double> ema(const std::vector<double>& prices, int period) {
     require_period(period, "EMA");
     if (prices.size() < static_cast<size_t>(period)) {
@@ -118,6 +124,7 @@ std::vector<double> ema(const std::vector<double>& prices, int period) {
     return result;
 }
 
+// MACD is fast EMA minus slow EMA, plus a signal EMA and histogram.
 MACDResult macd(const std::vector<double>& prices, int fast, int slow, int signal_period) {
     require_period(fast, "MACD fast");
     require_period(slow, "MACD slow");
@@ -160,6 +167,7 @@ MACDResult macd(const std::vector<double>& prices, int fast, int slow, int signa
     return result;
 }
 
+// ATR measures movement size, including overnight gaps from the prior close.
 std::vector<double> atr(
     const std::vector<double>& highs,
     const std::vector<double>& lows,
@@ -199,6 +207,7 @@ std::vector<double> atr(
     return result;
 }
 
+// Bollinger bands use SMA for the middle line and standard deviation for the outer bands.
 BollingerResult bollinger(const std::vector<double>& prices, int period, double stddev_multiplier) {
     require_period(period, "Bollinger");
     if (prices.size() < static_cast<size_t>(period)) {
@@ -227,6 +236,7 @@ BollingerResult bollinger(const std::vector<double>& prices, int period, double 
     return result;
 }
 
+// OBV adds or subtracts volume depending on whether close moved up or down.
 std::vector<double> obv(const std::vector<double>& closes, const std::vector<double>& volumes) {
     require_same_size(closes, volumes, "OBV");
     if (closes.empty()) {

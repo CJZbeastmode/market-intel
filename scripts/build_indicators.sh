@@ -6,6 +6,7 @@ set -eu
 
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [ -z "$PYTHON_BIN" ]; then
+    # Prefer the project venv so local and Docker builds use the same dependency set.
     if [ -x ".venv/bin/python" ]; then
         PYTHON_BIN=".venv/bin/python"
     else
@@ -13,6 +14,7 @@ if [ -z "$PYTHON_BIN" ]; then
     fi
 fi
 
+# Resolve to the real interpreter path because CMake prefers absolute executables.
 PYTHON_BIN="$("$PYTHON_BIN" -c 'import sys; print(sys.executable)')"
 
 if ! "$PYTHON_BIN" -m pybind11 --cmakedir >/dev/null 2>&1; then
@@ -23,6 +25,7 @@ fi
 
 PYBIND11_CMAKE_DIR="$("$PYTHON_BIN" -m pybind11 --cmakedir)"
 PY_TAG="$("$PYTHON_BIN" -c 'import sys; print(f"py{sys.version_info.major}{sys.version_info.minor}")')"
+# Separate build folders avoid Python version conflicts.
 BUILD_DIR="ml/indicators/build-$PY_TAG"
 
 cmake -S ml/indicators -B "$BUILD_DIR" \
@@ -32,4 +35,5 @@ cmake -S ml/indicators -B "$BUILD_DIR" \
 
 cmake --build "$BUILD_DIR"
 
+# End with a tiny smoke test so bad import wiring fails immediately.
 "$PYTHON_BIN" -c "import indicators; print(indicators.rsi([1, 2, 3, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 11, 13], 14)[-1])"

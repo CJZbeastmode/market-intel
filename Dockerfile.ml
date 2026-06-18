@@ -3,6 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Native indicators need a compiler and CMake during image build.
+# We compile once here so the runtime container only needs to import the module.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -14,7 +15,7 @@ RUN apt-get update \
 COPY requirements.ml-worker.txt ./
 RUN pip install --no-cache-dir -r requirements.ml-worker.txt
 
-# Copy Python worker code, native indicator source, and the build helper.
+# Copy the worker code and native source before running the shared build script.
 COPY ml ./ml
 COPY scripts/build_indicators.sh ./scripts/build_indicators.sh
 RUN ./scripts/build_indicators.sh

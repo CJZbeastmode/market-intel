@@ -24,6 +24,7 @@ class ComputeIndicatorsJob(BaseJob):
     job_name = "compute_indicators"
 
     def execute(self, payload: dict[str, Any], idempotency_key: str = "") -> list[dict[str, Any]]:
+        # Payload values can override env defaults, which keeps the scheduler flexible.
         tickers = parse_tickers(payload)
         period = str(payload.get("period") or os.getenv("INDICATOR_HISTORY_PERIOD", "6mo"))
         interval = str(payload.get("interval") or os.getenv("INDICATOR_HISTORY_INTERVAL", "1d"))
@@ -33,8 +34,11 @@ class ComputeIndicatorsJob(BaseJob):
 
         for ticker in tickers:
             try:
+                # Step 1: download enough OHLCV history for indicator math.
                 frame = fetch_history(ticker, period=period, interval=interval)
+                # Step 2: compute one latest indicator snapshot from that history.
                 row_time, values = compute_latest(frame)
+                # Step 3: persist the snapshot. The DB client owns idempotency details.
                 row_key = self.db.upsert_indicators(ticker, row_time, values)
                 result = {
                     "ticker": ticker,
@@ -61,6 +65,7 @@ def run(payload: dict[str, Any] | None = None, idempotency_key: str = "") -> lis
 
 
 def parse_tickers(payload: dict[str, Any]) -> list[str]:
+    # Accept one ticker, many tickers, or an env fallback for local runs.
     raw = payload.get("tickers") or payload.get("ticker") or os.getenv("TICKERS", "AAPL,NVDA,MSFT")
     if isinstance(raw, str):
         parts = raw.split(",")
@@ -76,6 +81,7 @@ def parse_tickers(payload: dict[str, Any]) -> list[str]:
 
 
 def fetch_history(ticker: str, period: str = "6mo", interval: str = "1d") -> Any:
+    # Remote I/O stays here. Everything after this point is local computation.
     frame = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=False)
     if frame.empty:
         raise RuntimeError(f"yfinance returned no history for {ticker}")
@@ -83,6 +89,7 @@ def fetch_history(ticker: str, period: str = "6mo", interval: str = "1d") -> Any
 
 
 def compute_latest(frame: Any) -> tuple[datetime, dict[str, float | None]]:
+    # The native module wants plain float arrays, not pandas Series objects.
     closes = numeric_series(frame, "Close")
     highs = numeric_series(frame, "High")
     lows = numeric_series(frame, "Low")
@@ -94,6 +101,7 @@ def compute_latest(frame: Any) -> tuple[datetime, dict[str, float | None]]:
     macd_result = indicators.macd(closes)
     bands = indicators.bollinger(closes, 20, 2.0)
 
+    # Store only the newest values. We do not persist the full indicator series in this sprint.
     values = {
         "rsi_14": latest_number(indicators.rsi(closes, 14)),
         "macd": latest_number(macd_result.macd),
@@ -111,6 +119,7 @@ def compute_latest(frame: Any) -> tuple[datetime, dict[str, float | None]]:
 
 
 def flatten_yfinance_columns(frame: Any) -> Any:
+    # yfinance sometimes returns a multi-index column shape for one ticker too.
     if getattr(frame.columns, "nlevels", 1) > 1:
         frame = frame.copy()
         frame.columns = [str(col[0]) for col in frame.columns]
@@ -118,12 +127,14 @@ def flatten_yfinance_columns(frame: Any) -> Any:
 
 
 def numeric_series(frame: Any, column: str) -> list[float]:
+    # Fail loudly if upstream columns are missing so we do not compute garbage.
     if column not in frame:
         raise ValueError(f"history is missing {column}")
     return [float(value) for value in frame[column].dropna().to_numpy().ravel().tolist()]
 
 
 def latest_timestamp(frame: Any) -> datetime:
+    # Use the market bar timestamp, not the job runtime, for indicator storage.
     latest = frame.index[-1]
     if hasattr(latest, "to_pydatetime"):
         value = latest.to_pydatetime()
@@ -135,6 +146,7 @@ def latest_timestamp(frame: Any) -> datetime:
 
 
 def latest_number(values: list[float]) -> float | None:
+    # Most indicators begin with NaN warmup values. Walk backward to the newest real number.
     for value in reversed(values):
         number = float(value)
         if not math.isnan(number):

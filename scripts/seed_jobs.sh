@@ -13,6 +13,7 @@ JOB_CRON="${JOB_CRON:-*/1 * * * 1-5}"
 # Payload must stay JSON-escaped because it is itself a JSON string inside the API request.
 JOB_PAYLOAD_JSON='jobs.ml:{\"job\":\"fetch_quotes\"}'
 COMPUTE_INDICATORS_CRON="${COMPUTE_INDICATORS_CRON:-*/5 * * * 1-5}"
+# Sprint 3 adds a second scheduled Kafka job for indicator computation.
 COMPUTE_INDICATORS_PAYLOAD_JSON='jobs.ml:{\"job\":\"compute_indicators\"}'
 
 tmp_file="$(mktemp)"
