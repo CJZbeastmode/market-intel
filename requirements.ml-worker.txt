@@ -1,4 +1,5 @@
 yfinance
+prophet
 kafka-python
 psycopg[binary]
 redis
