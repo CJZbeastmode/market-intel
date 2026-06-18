@@ -1,0 +1,15 @@
+FROM golang:1.22-alpine AS build
+
+WORKDIR /src
+COPY go.mod ./
+COPY cmd ./cmd
+COPY internal ./internal
+COPY pkg ./pkg
+RUN go build -o /out/crond ./cmd/crond
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates
+COPY --from=build /out/crond /usr/local/bin/crond
+ENTRYPOINT ["/usr/local/bin/crond"]
+

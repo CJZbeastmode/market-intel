@@ -1,0 +1,13 @@
+cluster:
+  mode: single
+  sharding_enabled: false
+  num_shards: 1
+  election_timeout_ms: 300
+
+portfolio:
+  user_id: default
+  tickers:
+    - AAPL
+    - NVDA
+    - MSFT
+

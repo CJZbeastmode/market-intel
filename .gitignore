@@ -1,2 +1,4 @@
 credentials.txt
 .env
+.venv/
+TODO
