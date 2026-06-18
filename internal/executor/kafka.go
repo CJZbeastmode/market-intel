@@ -11,12 +11,15 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
+// KafkaExecutor is the bridge from the Go scheduler into the async ML side.
+// The scheduler fires a cron job here, and this executor turns it into a Kafka message.
 type KafkaExecutor struct {
 	Brokers  []string
 	Timeout  time.Duration
 	Producer kafkaProducer
 }
 
+// Small interface so tests can fake Kafka without a real broker.
 type kafkaProducer interface {
 	Publish(ctx context.Context, brokers []string, topic string, key []byte, value []byte) error
 }
@@ -24,6 +27,8 @@ type kafkaProducer interface {
 type kafkaGoProducer struct{}
 
 func (kafkaGoProducer) Publish(ctx context.Context, brokers []string, topic string, key []byte, value []byte) error {
+	// We build a short-lived writer per publish.
+	// This is simple and good enough for the current load.
 	writer := &kafka.Writer{
 		Addr:         kafka.TCP(brokers...),
 		Topic:        topic,
@@ -40,7 +45,10 @@ func (kafkaGoProducer) Publish(ctx context.Context, brokers []string, topic stri
 }
 
 func (e *KafkaExecutor) Execute(job store.Job) error {
-	// Sprint 1 uses a simple "topic:message" payload contract.
+	// We keep the payload contract simple:
+	// "topic:message"
+	// Example:
+	// jobs.ml:{"job":"fetch_quotes"}
 	parts := strings.SplitN(job.Payload, ":", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf(`kafka executor payload must be "topic:message"`)
@@ -54,24 +62,28 @@ func (e *KafkaExecutor) Execute(job store.Job) error {
 	}
 
 	if len(e.Brokers) == 0 {
-		// No brokers is treated as a no-op for early local development.
+		// In very early local setup, empty brokers means "do nothing".
+		// We log it so the user can see why nothing reached Kafka.
 		log.Printf("[kafka] no brokers configured; skipping publish topic=%s msg=%s", topic, message)
 		return nil
 	}
 
 	timeout := e.Timeout
 	if timeout == 0 {
+		// Keep executor calls bounded so one bad broker does not hang the scheduler.
 		timeout = 10 * time.Second
 	}
 	producer := e.Producer
 	if producer == nil {
+		// Real runtime uses kafka-go. Tests can inject a fake producer.
 		producer = kafkaGoProducer{}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Use job ID as the key so repeated executions of one scheduled job map predictably.
+	// We use job ID as the Kafka key.
+	// That keeps messages from the same scheduled job grouped in a predictable way.
 	if err := producer.Publish(ctx, e.Brokers, topic, []byte(job.ID), []byte(message)); err != nil {
 		return fmt.Errorf("publish kafka message topic=%s: %w", topic, err)
 	}

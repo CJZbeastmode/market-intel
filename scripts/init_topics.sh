@@ -7,9 +7,11 @@ set -eu
 REPLICAS="${KAFKA_REPLICAS:-1}"
 
 if command -v rpk >/dev/null 2>&1; then
+    # Use host rpk if it exists.
     RPK_MODE="local"
     DEFAULT_BROKER="localhost:9092"
 else
+    # Otherwise use the Redpanda container's rpk.
     RPK_MODE="docker"
     DEFAULT_BROKER="redpanda:9092"
 fi
@@ -17,6 +19,7 @@ fi
 BROKER="${KAFKA_BROKERS:-$DEFAULT_BROKER}"
 
 run_rpk() {
+    # One helper so the rest of the script does not care where rpk comes from.
     if [ "$RPK_MODE" = "local" ]; then
         rpk "$@"
     else
@@ -25,6 +28,7 @@ run_rpk() {
 }
 
 topic_exists() {
+    # "describe" is enough to tell us whether the topic is already there.
     run_rpk topic describe "$1" -X "brokers=$BROKER" >/dev/null 2>&1
 }
 
@@ -33,6 +37,7 @@ create_topic() {
     partitions="$2"
 
     if topic_exists "$topic"; then
+        # Safe rerun behavior.
         echo "topic exists: $topic"
         return
     fi
@@ -46,10 +51,12 @@ create_topic() {
 
 echo "using broker: $BROKER"
 
-# ML work queue. More partitions let multiple ML workers consume jobs in parallel.
+# ML work queue.
+# We give this more partitions because many ML workers may share it later.
 create_topic "jobs.ml" 6
 
-# Market data/event topics. These can scale independently from the job queue.
+# Market data topics.
+# These are separate from jobs.ml so job scheduling and data fan-out stay decoupled.
 create_topic "market.quotes" 3
 create_topic "market.news" 3
 create_topic "market.earnings" 3

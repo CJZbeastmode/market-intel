@@ -8,6 +8,7 @@ from ml.db.timescale import TimescaleClient
 
 
 class BaseJob:
+    # Concrete jobs override this so logs show the real job name.
     job_name = "base"
 
     def __init__(
@@ -16,11 +17,12 @@ class BaseJob:
         db: TimescaleClient | None = None,
         redis: RedisClient | None = None,
     ) -> None:
-        # Every job carries the user id because the database and cache are multi-user.
+        # Every job carries the user id because DB rows and Redis keys are per user.
         self.user_id = user_id or os.getenv("USER_ID", "default")
         self.logger = logging.getLogger(f"ml.jobs.{self.job_name}")
 
-        # Keep clients on the job instance so concrete jobs only focus on business logic.
+        # Jobs get ready-to-use DB and Redis helpers.
+        # That keeps the concrete job code focused on its own logic.
         self.db = db or TimescaleClient(user_id=self.user_id)
         self.redis = redis or RedisClient(user_id=self.user_id)
 
@@ -38,8 +40,10 @@ class BaseJob:
             self.logger.exception("job failed")
             raise
         finally:
-            # The Redis client is connection-pooled, but the DB client owns one connection.
+            # Close the DB connection after each job run.
+            # Redis uses its own pooling internally.
             self.db.close()
 
     def execute(self, payload: dict[str, Any], idempotency_key: str = "") -> Any:
+        # Concrete jobs implement this.
         raise NotImplementedError

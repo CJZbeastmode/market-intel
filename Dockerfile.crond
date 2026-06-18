@@ -1,15 +1,18 @@
 FROM golang:1.22-alpine AS build
 
 WORKDIR /src
+# Copy go.mod and go.sum first so Go can resolve dependencies correctly inside Docker.
 COPY go.mod ./
+COPY go.sum ./
 COPY cmd ./cmd
 COPY internal ./internal
 COPY pkg ./pkg
+# Build one small scheduler binary.
 RUN go build -o /out/crond ./cmd/crond
 
 FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates
+# Final image only needs the compiled binary.
 COPY --from=build /out/crond /usr/local/bin/crond
 ENTRYPOINT ["/usr/local/bin/crond"]
-

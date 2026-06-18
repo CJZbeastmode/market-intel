@@ -10,6 +10,7 @@ from psycopg.rows import dict_row
 
 class TimescaleClient(AbstractContextManager["TimescaleClient"]):
     def __init__(self, user_id: str | None = None) -> None:
+        # Every row is tagged with one user id.
         self.user_id = user_id or os.getenv("USER_ID", "default")
         self._conn: psycopg.Connection[dict[str, Any]] | None = None
 
@@ -21,6 +22,7 @@ class TimescaleClient(AbstractContextManager["TimescaleClient"]):
         self.close()
 
     def connect(self) -> psycopg.Connection[dict[str, Any]]:
+        # Open lazily so jobs only connect if they really need the DB.
         if self._conn is None or self._conn.closed:
             self._conn = psycopg.connect(conninfo(), row_factory=dict_row)
         return self._conn
@@ -30,18 +32,21 @@ class TimescaleClient(AbstractContextManager["TimescaleClient"]):
             self._conn.close()
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
+        # Small helper for write queries.
         conn = self.connect()
         with conn.cursor() as cur:
             cur.execute(sql, params)
         conn.commit()
 
     def query(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        # Small helper for read queries that return many rows.
         conn = self.connect()
         with conn.cursor() as cur:
             cur.execute(sql, params)
             return list(cur.fetchall())
 
     def query_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
+        # Small helper for read queries that return one row.
         conn = self.connect()
         with conn.cursor() as cur:
             cur.execute(sql, params)
@@ -57,7 +62,9 @@ class TimescaleClient(AbstractContextManager["TimescaleClient"]):
         ask: float | None = None,
         source: str = "yfinance",
     ) -> str:
+        # Normalize time first so every writer uses UTC.
         timestamp = ensure_utc(timestamp)
+        # The idempotency key is what keeps repeated writes from duplicating the same quote.
         key = quote_idempotency_key(self.user_id, ticker, timestamp)
         self.execute(
             """
@@ -127,6 +134,7 @@ class TimescaleClient(AbstractContextManager["TimescaleClient"]):
 
 
 def conninfo() -> str:
+    # Read DB settings from env so Docker and local runs share one code path.
     host = os.getenv("DB_HOST", "localhost")
     port = os.getenv("DB_PORT", "5432")
     name = os.getenv("DB_NAME", "marketintel")
@@ -136,29 +144,33 @@ def conninfo() -> str:
 
 
 def ensure_utc(value: datetime) -> datetime:
+    # We store all times in UTC so comparisons stay clean.
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
 
 
 def hash_key(*parts: object) -> str:
+    # Short stable hash used for idempotency keys.
     content = ":".join(str(part) for part in parts)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 
 def minute_bucket(value: datetime) -> str:
+    # Sprint 2 quote jobs run on minute-level schedule, so minute granularity is enough.
     value = ensure_utc(value)
     return value.strftime("%Y-%m-%dT%H:%M")
 
 
 def quote_idempotency_key(user_id: str, ticker: str, timestamp: datetime) -> str:
+    # Same user + ticker + minute => same logical quote write.
     return hash_key(user_id, ticker.upper(), minute_bucket(timestamp))
 
 
 def ohlcv_idempotency_key(user_id: str, ticker: str, timestamp: datetime, interval: str) -> str:
+    # Interval matters for OHLCV because 1m and 1d bars are different rows.
     return hash_key(user_id, ticker.upper(), interval, minute_bucket(timestamp))
 
 
 def indicator_idempotency_key(user_id: str, ticker: str, timestamp: datetime) -> str:
     return hash_key(user_id, ticker.upper(), minute_bucket(timestamp))
-
