@@ -22,6 +22,7 @@ class RunPredictionsJob(BaseJob):
         tickers = parse_tickers(payload)
         period = str(payload.get("period") or os.getenv("PREDICTION_HISTORY_PERIOD", DEFAULT_HISTORY_PERIOD))
         interval = str(payload.get("interval") or os.getenv("PREDICTION_HISTORY_INTERVAL", DEFAULT_HISTORY_INTERVAL))
+        # Horizon stays configurable because later jobs may ask for different windows.
         horizon_days = int(payload.get("horizon_days") or os.getenv("PREDICTION_HORIZON_DAYS", "7"))
 
         predictions: list[dict[str, Any]] = []
@@ -32,6 +33,7 @@ class RunPredictionsJob(BaseJob):
                 # Fetch history here, then keep modeling hidden behind the ensemble interface.
                 history = fetch_history(ticker, period=period, interval=interval)
                 prediction = ensemble.predict(ticker=ticker, history=history, horizon_days=horizon_days)
+                # The DB helper owns the row shape and idempotency policy.
                 row_key = self.db.upsert_prediction(prediction, timestamp=datetime.now(timezone.utc))
                 prediction["idempotency_key"] = row_key
                 prediction["user_id"] = self.user_id
@@ -61,6 +63,8 @@ def run(payload: dict[str, Any] | None = None, idempotency_key: str = "") -> lis
 
 
 def parse_tickers(payload: dict[str, Any]) -> list[str]:
+    # Same priority style as the earlier jobs:
+    # payload first, env second, sensible defaults last.
     raw = payload.get("tickers") or payload.get("ticker") or os.getenv("TICKERS", "AAPL,NVDA,MSFT")
     if isinstance(raw, str):
         parts = raw.split(",")
@@ -80,6 +84,7 @@ def fetch_history(ticker: str, period: str = DEFAULT_HISTORY_PERIOD, interval: s
     frame = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=False)
     if frame.empty:
         raise RuntimeError(f"yfinance returned no history for {ticker}")
+    # The model only needs clean close history, not rows with missing closes.
     return flatten_yfinance_columns(frame).dropna(subset=["Close"])
 
 
@@ -92,6 +97,8 @@ def flatten_yfinance_columns(frame: Any) -> Any:
 
 
 if __name__ == "__main__":
+    # Handy local entrypoint:
+    # python -m ml.jobs.run_predictions
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     run()

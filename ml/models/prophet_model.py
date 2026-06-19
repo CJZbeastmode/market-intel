@@ -18,6 +18,7 @@ def predict_close(
     neutral_threshold_pct: float = DEFAULT_NEUTRAL_THRESHOLD_PCT,
 ) -> dict[str, Any]:
     """Train on daily closes and return the stable Sprint 4 prediction contract."""
+    # Keep one strict contract here so jobs, DB writes, and later APIs all speak the same shape.
     ticker = ticker.strip().upper()
     if not ticker:
         raise ValueError("ticker is required")
@@ -28,6 +29,7 @@ def predict_close(
     if len(prophet_frame) < DEFAULT_MIN_HISTORY_ROWS:
         raise ValueError(f"at least {DEFAULT_MIN_HISTORY_ROWS} history rows are required for Prophet")
 
+    # The latest close is our anchor for turning the forecast into up/down/neutral.
     latest_close = float(prophet_frame["y"].iloc[-1])
 
     # Keep the first baseline conservative. Daily close data does not need sub-daily seasonality.
@@ -43,6 +45,7 @@ def predict_close(
     future = model.make_future_dataframe(periods=horizon_days, freq="B", include_history=False)
     forecast = model.predict(future)
 
+    # Store a simple JSON-friendly array because this goes straight to Timescale JSONB later.
     forecast_values = [
         {
             "date": json_date(row["ds"]),
@@ -57,7 +60,7 @@ def predict_close(
     final_price = float(final_forecast["value"])
     pct_change = (final_price - latest_close) / latest_close
 
-    # Keep this return shape stable. The DB writer and ensemble layer can depend on it.
+    # Keep this return shape stable. The DB writer and ensemble layer depend on it.
     return {
         "ticker": ticker,
         "model": "prophet",
@@ -70,6 +73,7 @@ def predict_close(
 
 def prepare_prophet_frame(history: Any) -> pd.DataFrame:
     """Convert common OHLCV dataframe shapes into Prophet's ds/y format."""
+    # The job may pass a normal dataframe, a yfinance frame, or something close to both.
     frame = pd.DataFrame(history).copy()
     frame = flatten_yfinance_columns(frame)
 
@@ -81,6 +85,7 @@ def prepare_prophet_frame(history: Any) -> pd.DataFrame:
     if date_column is not None:
         ds = pd.to_datetime(frame[date_column])
     else:
+        # If there is no explicit date column, use the dataframe index as market dates.
         ds = pd.to_datetime(frame.index)
 
     out = pd.DataFrame(
@@ -111,6 +116,7 @@ def flatten_yfinance_columns(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def find_column(frame: pd.DataFrame, *names: str) -> str | None:
+    # Accept a few common names so the model is not tied to one dataframe source.
     wanted = {name.lower() for name in names}
     for column in frame.columns:
         if str(column).lower() in wanted:
@@ -119,6 +125,7 @@ def find_column(frame: pd.DataFrame, *names: str) -> str | None:
 
 
 def classify_direction(expected_return: float, neutral_threshold_pct: float) -> str:
+    # Small moves are "neutral" so the model does not over-signal noise.
     if expected_return > neutral_threshold_pct:
         return "up"
     if expected_return < -neutral_threshold_pct:
@@ -133,12 +140,14 @@ def confidence_from_interval(forecast: dict[str, Any], latest_close: float) -> f
     if latest_close <= 0 or upper <= lower:
         return 0.0
 
+    # Narrower interval => higher confidence.
     interval_pct = (upper - lower) / latest_close
     confidence = 1.0 - min(interval_pct, 1.0)
     return round(max(0.0, min(confidence, 1.0)), 4)
 
 
 def safe_float(value: Any) -> float | None:
+    # Turn model values into plain Python floats and drop NaNs before JSON storage.
     if value is None:
         return None
     number = float(value)
@@ -148,6 +157,7 @@ def safe_float(value: Any) -> float | None:
 
 
 def json_date(value: Any) -> str:
+    # Always return an ISO date string so forecast_values is easy to store and read back.
     if isinstance(value, pd.Timestamp):
         return value.date().isoformat()
     if isinstance(value, datetime):

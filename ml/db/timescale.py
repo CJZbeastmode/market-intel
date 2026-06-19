@@ -139,6 +139,7 @@ class TimescaleClient(AbstractContextManager["TimescaleClient"]):
         ticker = str(prediction["ticker"]).upper()
         model = str(prediction["model"])
         horizon_days = int(prediction["horizon_days"])
+        # Model + ticker + horizon + minute is our logical "same prediction write" identity.
         key = prediction_idempotency_key(self.user_id, ticker, model, horizon_days, timestamp)
         self.execute(
             """
@@ -156,7 +157,9 @@ class TimescaleClient(AbstractContextManager["TimescaleClient"]):
                 horizon_days,
                 prediction["direction"],
                 float(prediction["confidence"]),
+                # forecast_values stays JSON so the job can store the whole 7-day shape in one row.
                 Jsonb(prediction.get("forecast_values")),
+                # Feature importance is not used in Sprint 4, but keep the column ready.
                 Jsonb(prediction["feature_importance"]) if prediction.get("feature_importance") is not None else None,
                 key,
             ),
@@ -220,4 +223,5 @@ def prediction_idempotency_key(
     horizon_days: int,
     timestamp: datetime,
 ) -> str:
+    # Same minute + same ticker + same model + same horizon => same logical prediction row.
     return hash_key(user_id, ticker.upper(), model, horizon_days, minute_bucket(timestamp))

@@ -17,6 +17,7 @@ COMPUTE_INDICATORS_CRON="${COMPUTE_INDICATORS_CRON:-*/5 * * * 1-5}"
 COMPUTE_INDICATORS_PAYLOAD_JSON='jobs.ml:{\"job\":\"compute_indicators\"}'
 RUN_PREDICTIONS_CRON="${RUN_PREDICTIONS_CRON:-30 21 * * 1-5}"
 # Sprint 4 adds an after-market prediction job.
+# This stays separate from quote fetching because forecasts should run on finished daily bars.
 RUN_PREDICTIONS_PAYLOAD_JSON='jobs.ml:{\"job\":\"run_predictions\"}'
 
 tmp_file="$(mktemp)"
@@ -142,6 +143,7 @@ seed_job \
 # run after market close on weekdays
 # use the Kafka executor
 # publish {"job":"run_predictions"} to jobs.ml
+# Tests may override the cron env var temporarily, but the default stays after-close.
 seed_job \
     "run_predictions" \
     "run_predictions" \

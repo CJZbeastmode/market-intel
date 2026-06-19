@@ -255,3 +255,31 @@ That means:
 Prophet may log a Plotly warning inside the worker container.
 
 That warning does not block model training or forecast writes.
+
+## Further Improvements
+
+### Heavy model worker
+
+If model quality becomes more important than worker simplicity, a later improvement is to split heavy models into a separate container.
+
+Example shape:
+
+- keep `ml-worker` lean for quotes, indicators, and Prophet
+- create a separate heavy model worker for deep-learning models
+- publish heavy prediction jobs to a different Kafka route or job name
+
+Why this is better:
+
+- the main worker stays fast to build and restart
+- PyTorch-style dependencies do not bloat the baseline worker image
+- heavy model experiments stay isolated from the stable production path
+
+### Future `N-BEATS`
+
+`N-BEATS` is a reasonable future experiment, but only behind a separate heavy-worker path.
+
+It should be treated as:
+
+- optional model-quality work
+- not part of the core Sprint 4 pipeline
+- a candidate for later ensemble improvements once Prophet results are already being tracked
