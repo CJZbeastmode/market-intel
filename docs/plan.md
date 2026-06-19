@@ -145,17 +145,24 @@ print(f"PASS — {elapsed:.2f}ms")
 
 **Goal:** 7-day direction forecast for each ticker saved to TimescaleDB every day after market close.
 
+**Scope note:** Keep Sprint 4 Prophet-first. Do not add N-BEATS, anomaly detection, or portfolio risk in this sprint.
+
 **Files to create:**
 - `ml/models/prophet_model.py` — Prophet baseline, returns direction + confidence + forecast_values
-- `ml/models/ensemble.py` — combine prophet output (N-BEATS deferred to post-open-source)
+- `ml/models/ensemble.py` — thin wrapper around Prophet output for now (N-BEATS deferred to a later enhancement after Sprint 4 is stable)
 - `ml/jobs/run_predictions.py` — run ensemble for all tickers → upsert predictions table
-- `requirements.txt` — add prophet, neuralprophet
+- `requirements.txt` — add prophet
 
 **Session breakdown:**
 - Session 1: Prophet install + basic model on 90 days OHLCV
 - Session 2: Wrap as job, write forecast to predictions table
 - Session 3: Add confidence intervals + direction classification logic
 - Session 4: Backtest on 30 days held-out data + add to seed_jobs.sh
+
+**Deferred after Sprint 4:**
+- `ml/models/nbeats_model.py` and true multi-model ensembling
+- anomaly detection
+- portfolio risk jobs
 
 **Acceptance test:**
 ```bash
@@ -212,12 +219,15 @@ print(results[0]['text'][:200])
 
 **Goal:** Daily brief generated and saved to MinIO every morning at 7am.
 
+**Scope note:** This is the sprint where anomaly detection and portfolio-risk style AI jobs begin. They depend on the prediction and data layers from earlier sprints already being stable.
+
 **Files to create:**
 - `ml/ai/openrouter.py` — call_model() with task-based model routing
 - `ml/pipelines/daily_brief.py` — 6-node LangGraph pipeline (full code in FORWARD.md section 14)
 - `ml/pipelines/earnings.py` — earnings analysis pipeline
 - `ml/pipelines/anomalies.py` — anomaly detection pipeline
 - `ml/pipelines/server.py` — FastAPI server exposing pipelines as HTTP endpoints (for langgraph executor)
+- `ml/jobs/check_portfolio_risk.py` — VaR + correlation + AI-assisted risk summary
 
 **Update docker-compose.yml** to add: minio, n8n
 
@@ -225,7 +235,7 @@ print(results[0]['text'][:200])
 - Session 1: openrouter.py + config.yaml AI section + MinIO bucket setup
 - Session 2: daily_brief.py nodes 1–3 (fetch_prices, fetch_predictions, fetch_news)
 - Session 3: daily_brief.py nodes 4–6 (rag_context, synthesize, store) + pipelines/server.py
-- Session 4: earnings.py + anomalies.py + seed generate_daily_brief job
+- Session 4: earnings.py + anomalies.py + initial `check_portfolio_risk.py` + seed generate_daily_brief job
 
 **Acceptance test:**
 ```bash
